@@ -27,11 +27,13 @@ from app.api.network import router as network_router
 from app.api.pole_state import router as pole_state_router
 from app.api.tickets import router as tickets_router
 from app.api.scheduled_outages import router as scheduled_outages_router
+from app.api.simulator import router as simulator_router
 from app.core.redis_client import close_redis, init_redis, get_redis
 from app.core.topology import NetworkTopology, build_topology
 from app.core.fault_detector import FaultDetector
 from app.core.scheduled_outages import ScheduledOutageManager
 from app.core.restoration_verifier import RestorationVerifier
+from app.core.simulator import FaultSimulator
 from app.database import AsyncSessionLocal, create_tables
 from app.seed.generate_network import seed_database
 
@@ -67,6 +69,13 @@ async def lifespan(app: FastAPI):
         db_session_factory=AsyncSessionLocal
     )
     await app.state.restoration_verifier.start()
+
+    app.state.simulator = FaultSimulator(
+        topology=app.state.topology,
+        redis_client=get_redis(),
+        outage_manager=app.state.outage_manager
+    )
+    await app.state.simulator.init_all_live()
 
     yield
     # ── Shutdown ───────────────────────────────────────────────────────────────
@@ -109,6 +118,7 @@ app.include_router(ingest_router, prefix="/api")   # POST /api/telemetry, /api/t
 app.include_router(pole_state_router)              # GET  /api/poles/*
 app.include_router(tickets_router, prefix="/api")  # GET /api/tickets, ...
 app.include_router(scheduled_outages_router, prefix="/api")
+app.include_router(simulator_router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------
