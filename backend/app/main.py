@@ -25,8 +25,10 @@ from app.api.health import router as health_router
 from app.api.ingest import router as ingest_router
 from app.api.network import router as network_router
 from app.api.pole_state import router as pole_state_router
-from app.core.redis_client import close_redis, init_redis
+from app.api.tickets import router as tickets_router
+from app.core.redis_client import close_redis, init_redis, get_redis
 from app.core.topology import NetworkTopology, build_topology
+from app.core.fault_detector import FaultDetector
 from app.database import AsyncSessionLocal, create_tables
 from app.seed.generate_network import seed_database
 
@@ -43,8 +45,16 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as session:
         app.state.topology = await build_topology(session)
 
+    app.state.fault_detector = FaultDetector(
+        topology=app.state.topology,
+        redis_client=get_redis(),
+        db_session_factory=AsyncSessionLocal
+    )
+    await app.state.fault_detector.start()
+
     yield
     # ── Shutdown ───────────────────────────────────────────────────────────────
+    await app.state.fault_detector.stop()
     await close_redis()
 
 
@@ -80,6 +90,7 @@ app.include_router(health_router)                  # GET  /api/health
 app.include_router(network_router)                 # GET  /api/network/*
 app.include_router(ingest_router, prefix="/api")   # POST /api/telemetry, /api/telemetry/batch
 app.include_router(pole_state_router)              # GET  /api/poles/*
+app.include_router(tickets_router, prefix="/api")  # GET /api/tickets, ...
 
 
 # ---------------------------------------------------------------------------
@@ -110,4 +121,5 @@ async def root():
         "topology_summary": "/api/network/topology-summary",
         "telemetry_ingest": "/api/telemetry",
         "dark_poles": "/api/poles/dark",
+        "tickets": "/api/tickets",
     }
