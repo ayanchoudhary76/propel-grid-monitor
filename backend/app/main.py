@@ -26,9 +26,12 @@ from app.api.ingest import router as ingest_router
 from app.api.network import router as network_router
 from app.api.pole_state import router as pole_state_router
 from app.api.tickets import router as tickets_router
+from app.api.scheduled_outages import router as scheduled_outages_router
 from app.core.redis_client import close_redis, init_redis, get_redis
 from app.core.topology import NetworkTopology, build_topology
 from app.core.fault_detector import FaultDetector
+from app.core.scheduled_outages import ScheduledOutageManager
+from app.core.restoration_verifier import RestorationVerifier
 from app.database import AsyncSessionLocal, create_tables
 from app.seed.generate_network import seed_database
 
@@ -45,15 +48,29 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as session:
         app.state.topology = await build_topology(session)
 
+    app.state.outage_manager = ScheduledOutageManager()
+    feeder_ids = list(app.state.topology.feeder_dts.keys())
+    dt_ids = list(app.state.topology.transformers.keys())
+    app.state.outage_manager.seed_sample_outages(feeder_ids, dt_ids)
+
     app.state.fault_detector = FaultDetector(
+        topology=app.state.topology,
+        redis_client=get_redis(),
+        db_session_factory=AsyncSessionLocal,
+        outage_manager=app.state.outage_manager
+    )
+    await app.state.fault_detector.start()
+    
+    app.state.restoration_verifier = RestorationVerifier(
         topology=app.state.topology,
         redis_client=get_redis(),
         db_session_factory=AsyncSessionLocal
     )
-    await app.state.fault_detector.start()
+    await app.state.restoration_verifier.start()
 
     yield
     # ── Shutdown ───────────────────────────────────────────────────────────────
+    await app.state.restoration_verifier.stop()
     await app.state.fault_detector.stop()
     await close_redis()
 
@@ -91,6 +108,7 @@ app.include_router(network_router)                 # GET  /api/network/*
 app.include_router(ingest_router, prefix="/api")   # POST /api/telemetry, /api/telemetry/batch
 app.include_router(pole_state_router)              # GET  /api/poles/*
 app.include_router(tickets_router, prefix="/api")  # GET /api/tickets, ...
+app.include_router(scheduled_outages_router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------
@@ -122,4 +140,5 @@ async def root():
         "telemetry_ingest": "/api/telemetry",
         "dark_poles": "/api/poles/dark",
         "tickets": "/api/tickets",
+        "scheduled_outages": "/api/scheduled-outages"
     }

@@ -3,11 +3,13 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
 from sqlalchemy import select, and_
 
 from app.core.topology import NetworkTopology
+from app.core.scheduled_outages import ScheduledOutageManager
 from app.models.ticket import Ticket, FaultType, TicketStatus, TopologySource
 
 logger = logging.getLogger(__name__)
@@ -29,26 +31,35 @@ class FaultDetector:
         self,
         topology: NetworkTopology,
         redis_client: aioredis.Redis,
-        db_session_factory
+        db_session_factory,
+        outage_manager: ScheduledOutageManager
     ):
         self.topology = topology
         self.redis = redis_client
         self.db_session_factory = db_session_factory
+        self.outage_manager = outage_manager
         self._listener_task: Optional[asyncio.Task] = None
+        self._overdue_check_task: Optional[asyncio.Task] = None
         self._debounce_tasks: Dict[str, asyncio.Task] = {}
         self.debounce_seconds = 30.0
 
     async def start(self):
         """Start the pub/sub listener as a background task."""
         self._listener_task = asyncio.create_task(self._listen())
+        self._overdue_check_task = asyncio.create_task(self._check_overdue_outages())
         logger.info("FaultDetector started")
 
     async def stop(self):
         """Graceful shutdown."""
         if self._listener_task:
             self._listener_task.cancel()
+        if self._overdue_check_task:
+            self._overdue_check_task.cancel()
             try:
-                await self._listener_task
+                if self._listener_task:
+                    await self._listener_task
+                if self._overdue_check_task:
+                    await self._overdue_check_task
             except asyncio.CancelledError:
                 pass
         for task in self._debounce_tasks.values():
@@ -117,9 +128,18 @@ class FaultDetector:
             # None means state unknown (e.g. no device), True="1", False="0"
             if res is not None:
                 pole_states[p.pole_id] = (res == "1")
+
+        # Check scheduled outage suppression
+        if self.outage_manager.is_under_scheduled_outage(dt_id=dt_id):
+            logger.info(f"DT {dt_id} is under scheduled outage — suppressing fault ticket")
+            return
+            
+        feeder_id = poles[0].feeder_id
+        if self.outage_manager.is_under_scheduled_outage(feeder_id=feeder_id):
+            logger.info(f"Feeder {feeder_id} is under scheduled outage — suppressing fault ticket")
+            return
                 
         # Check Feeder Fault first (Case C)
-        feeder_id = poles[0].feeder_id
         is_feeder_fault = await self._analyze_feeder(feeder_id)
         if is_feeder_fault:
             return
@@ -386,3 +406,26 @@ class FaultDetector:
             }
             await self.redis.publish("new_tickets", json.dumps(ticket_dict))
             return ticket
+
+    async def _check_overdue_outages(self):
+        """Periodically check if scheduled outages have ended but poles are still dark.
+        If so, treat it as a real fault and create a ticket."""
+        while True:
+            try:
+                await asyncio.sleep(300) # Every 5 minutes
+                now = datetime.now(timezone.utc)
+                for o in self.outage_manager._outages:
+                    buffer_end = o.end + timedelta(minutes=40)
+                    # Check if the outage window (+40m buffer) ended within the last 2 hours
+                    if buffer_end < now < buffer_end + timedelta(hours=2):
+                        logger.info(f"Checking overdue scheduled outage {o.id}")
+                        if o.scope == "dt":
+                            await self._analyze_dt(o.target_id)
+                        elif o.scope == "feeder":
+                            dts = self.topology.feeder_dts.get(o.target_id, [])
+                            for dt_id in dts:
+                                await self._analyze_dt(dt_id)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in _check_overdue_outages: {e}", exc_info=True)
