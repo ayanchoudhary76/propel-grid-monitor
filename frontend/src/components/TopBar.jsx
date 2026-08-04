@@ -6,15 +6,18 @@ import { api } from '../api';
 export function TopBar() {
   const [time, setTime] = useState(new Date());
   const { data: stats } = usePolling(api.getStats, 30000);
+  const { data: darkPoles } = usePolling(api.getDarkPoles, 5000);
+  const { data: activeTickets } = usePolling(api.getActiveTickets, 5000);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const totalPoles = stats?.total_poles || 0;
-  const onlinePoles = stats?.live_poles || 0;
-  const activeFaults = stats?.active_tickets || 0;
+  const totalPoles = stats?.poles_with_devices || 0;
+  const darkCount = darkPoles?.count || 0;
+  const onlinePoles = totalPoles - darkCount;
+  const activeFaults = activeTickets?.length || 0;
 
   return (
     <div style={{
@@ -47,13 +50,23 @@ export function TopBar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Activity size={16} color="var(--text-muted)" />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Network Status</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Poles Online</span>
             <span style={{ fontSize: '13px', fontWeight: '500' }}>
-              {onlinePoles.toLocaleString()} / {totalPoles.toLocaleString()} Live
+              {onlinePoles.toLocaleString()} / {totalPoles.toLocaleString()}
             </span>
           </div>
         </div>
         
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertOctagon size={16} color={darkCount > 0 ? "var(--accent-red)" : "var(--text-muted)"} />
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Dark Poles</span>
+            <span style={{ fontSize: '13px', fontWeight: '500', color: darkCount > 0 ? 'var(--accent-red)' : 'var(--text-primary)' }}>
+              {darkCount}
+            </span>
+          </div>
+        </div>
+
         <div style={{ 
           display: 'flex', alignItems: 'center', gap: '8px',
           padding: '4px 12px', borderRadius: '20px',
@@ -87,3 +100,4 @@ export function TopBar() {
     </div>
   );
 }
+
