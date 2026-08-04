@@ -33,8 +33,15 @@ class Settings(BaseSettings):
                 self.REDIS_URL = rurl.replace("red://", "redis://", 1)
             else:
                 self.REDIS_URL = f"redis://{rurl}"
+            rurl = self.REDIS_URL
+
+        # Cloud-hosted Redis (Upstash, Render, Aiven) require TLS.
+        # Auto-upgrade redis:// → rediss:// for non-local hosts.
+        if rurl.startswith("redis://") and not any(
+            h in rurl for h in ("localhost", "127.0.0.1", "redis:6379")
+        ):
+            self.REDIS_URL = rurl.replace("redis://", "rediss://", 1)
         return self
 
 
 settings = Settings()
-
