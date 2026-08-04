@@ -60,7 +60,10 @@ class FaultSimulator:
             await ingest_batch(payloads=payloads, db=db, redis=self.redis)
 
     async def _generate_telemetry(
-        self, affected_poles: List[PoleNode], is_restoration: bool = False
+        self,
+        affected_poles: List[PoleNode],
+        is_restoration: bool = False,
+        guarantee_delivery: bool = False,
     ) -> Tuple[int, int]:
         """
         Generate telemetry for affected poles and send it.
@@ -110,9 +113,9 @@ class FaultSimulator:
                 sent += 2
             else:
                 # Fault: Power Lost
-                if fw.startswith("1.2"):
+                if not guarantee_delivery and fw.startswith("1.2"):
                     suppressed += 1
-                elif self.rng.random() < 0.3:
+                elif not guarantee_delivery and self.rng.random() < 0.3:
                     suppressed += 1
                 else:
                     payloads.append(TelemetryPayload(
@@ -176,7 +179,9 @@ class FaultSimulator:
             f"span between {pole_id_upstream} and {pole_id_downstream}",
         )
         
-        sent, suppressed = await self._generate_telemetry(affected_poles, is_restoration=False)
+        sent, suppressed = await self._generate_telemetry(
+            affected_poles, is_restoration=False, guarantee_delivery=True
+        )
         
         fault = SimulatedFault(
             fault_id=str(uuid.uuid4()),
@@ -196,7 +201,9 @@ class FaultSimulator:
         affected_pole_ids = [p.pole_id for p in affected_poles]
         self._require_observable_target(affected_poles, f"DT {dt_id}")
 
-        sent, suppressed = await self._generate_telemetry(affected_poles, is_restoration=False)
+        sent, suppressed = await self._generate_telemetry(
+            affected_poles, is_restoration=False, guarantee_delivery=True
+        )
 
         fault = SimulatedFault(
             fault_id=str(uuid.uuid4()),
@@ -216,7 +223,9 @@ class FaultSimulator:
         affected_pole_ids = [p.pole_id for p in affected_poles]
         self._require_observable_target(affected_poles, f"feeder {feeder_id}")
 
-        sent, suppressed = await self._generate_telemetry(affected_poles, is_restoration=False)
+        sent, suppressed = await self._generate_telemetry(
+            affected_poles, is_restoration=False, guarantee_delivery=True
+        )
 
         fault = SimulatedFault(
             fault_id=str(uuid.uuid4()),
@@ -444,10 +453,12 @@ class FaultSimulator:
             # Clear simulator-created scheduled outages.
             self.outage_manager.clear()
             
-            # Reset counters
+            # Reset counters and restore the live baseline required for fault
+            # classification. Without this, all non-fault poles are unknown.
             self._seq_counters.clear()
+            baseline = await self.init_all_live()
             
-            return {"status": "reset complete"}
+            return {**baseline, "status": "reset complete"}
         except Exception as e:
             import traceback
             logger.error(f"Error in reset: {e}")

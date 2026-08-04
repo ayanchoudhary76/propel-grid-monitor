@@ -41,6 +41,7 @@ class FaultDetector:
         self._listener_task: Optional[asyncio.Task] = None
         self._overdue_check_task: Optional[asyncio.Task] = None
         self._debounce_tasks: Dict[str, asyncio.Task] = {}
+        self._feeder_locks: Dict[str, asyncio.Lock] = {}
         self.debounce_seconds = 30.0
 
     async def start(self):
@@ -163,11 +164,23 @@ class FaultDetector:
             if ds in pole_states:
                 del pole_states[ds]
 
+        monitored_poles = [p for p in poles if p.device_id]
+        has_complete_sensor_coverage = all(
+            p.pole_id in pole_states for p in monitored_poles
+        )
         all_known_dark = all(not state for pid, state in pole_states.items() if pid in pole_states)
         any_known_live = any(state for pid, state in pole_states.items() if pid in pole_states)
 
-        # Case B - DT fault: ALL poles under the DT are dark (or have no device and neighbors are dark), and none are live.
-        if all_known_dark and not any_known_live and len(pole_states) > 0:
+        # Case B - DT fault: every monitored pole under the DT is confirmed
+        # dark. Unknown state is not evidence of an outage; otherwise a single
+        # dark reading immediately after a simulator reset can look like a
+        # transformer-level failure.
+        if (
+            monitored_poles
+            and has_complete_sensor_coverage
+            and all_known_dark
+            and not any_known_live
+        ):
             dt_node = self.topology.transformers.get(dt_id)
             if dt_node:
                 total_poles = dt_node.total_poles
@@ -216,30 +229,34 @@ class FaultDetector:
             await self._create_ticket(fault_info)
 
     async def _analyze_feeder(self, feeder_id: str) -> bool:
+        # Every affected DT schedules its own debounce task. Serialize feeder
+        # promotion so concurrent tasks cannot create duplicate incidents.
+        lock = self._feeder_locks.setdefault(feeder_id, asyncio.Lock())
+        async with lock:
+            return await self._analyze_feeder_locked(feeder_id)
+
+    async def _analyze_feeder_locked(self, feeder_id: str) -> bool:
         """Check if all DTs on a feeder are dark → feeder-level fault."""
         dts = self.topology.feeder_dts.get(feeder_id, [])
         if not dts:
             return False
 
+        monitored_poles = []
         pipe = self.redis.pipeline()
         for dt_id in dts:
             poles = self.topology.get_poles_for_dt(dt_id)
             for p in poles:
+                if not p.device_id:
+                    continue
+                monitored_poles.append(p)
                 pipe.hget(f"pole:{p.pole_id}", "energized")
                 
         results = await pipe.execute()
-        
-        any_live = False
-        has_any_telemetry = False
-        
-        for res in results:
-            if res is not None:
-                has_any_telemetry = True
-                if res == "1":
-                    any_live = True
-                    break
-                    
-        if any_live or not has_any_telemetry:
+
+        # A feeder fault needs positive evidence from the entire monitored
+        # feeder. Previously, one dark pole plus unknown states everywhere else
+        # was enough to classify every simulated fault as feeder-level.
+        if not monitored_poles or any(res != "0" for res in results):
             return False
 
         # All reporting poles on the feeder are dark -> feeder fault

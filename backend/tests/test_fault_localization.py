@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from app.core.fault_detector import FaultDetector
@@ -203,6 +205,40 @@ async def test_feeder_fault_all_dts_dark(fault_detector, multi_dt_feeder_topolog
     fault_detector._create_ticket.assert_called_once()
     fault_info = fault_detector._create_ticket.call_args[0][0]
     assert fault_info["fault_type"] == FaultType.feeder
+
+@pytest.mark.asyncio
+async def test_feeder_fault_requires_confirmed_dark_state_for_every_device(fault_detector, multi_dt_feeder_topology):
+    fault_detector.topology = multi_dt_feeder_topology
+    # A single dark reading does not prove that the other five monitored poles
+    # are dark; they may simply have no telemetry yet after a simulator reset.
+    fault_detector.redis.pipeline.return_value.execute.return_value = ["0"] + [None] * 5
+
+    is_feeder_fault = await fault_detector._analyze_feeder("F-TEST")
+
+    assert is_feeder_fault is False
+    fault_detector._create_ticket.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_feeder_analysis_is_serialized_per_feeder(fault_detector):
+    active_calls = 0
+    max_concurrent_calls = 0
+
+    async def controlled_analysis(_feeder_id):
+        nonlocal active_calls, max_concurrent_calls
+        active_calls += 1
+        max_concurrent_calls = max(max_concurrent_calls, active_calls)
+        await asyncio.sleep(0)
+        active_calls -= 1
+        return True
+
+    fault_detector._analyze_feeder_locked = controlled_analysis
+    await asyncio.gather(
+        fault_detector._analyze_feeder("F-TEST"),
+        fault_detector._analyze_feeder("F-TEST"),
+    )
+
+    assert max_concurrent_calls == 1
 
 @pytest.mark.asyncio
 async def test_fault_boundary_through_deviceless_poles(topology_with_gaps):

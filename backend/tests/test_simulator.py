@@ -54,6 +54,26 @@ async def test_random_span_fault_reports_when_no_observable_span_exists(topology
     assert exc_info.value.detail == "No observable spans found in DT"
 
 
+@pytest.mark.asyncio
+async def test_fault_injection_delivers_all_affected_device_states(simple_linear_topology):
+    simulator = FaultSimulator(
+        topology=simple_linear_topology,
+        redis_client=MagicMock(),
+        outage_manager=MagicMock(),
+    )
+    simulator._send_batch = AsyncMock()
+    affected_poles = simple_linear_topology.get_poles_for_dt("DT-TEST")
+
+    sent, suppressed = await simulator._generate_telemetry(
+        affected_poles, guarantee_delivery=True
+    )
+
+    assert sent == len(affected_poles)
+    assert suppressed == 0
+    payloads = simulator._send_batch.await_args.args[0]
+    assert len(payloads) == len(affected_poles)
+
+
 def test_simulator_sequence_numbers_do_not_restart_at_the_deduplication_floor(
     simple_linear_topology,
 ):
