@@ -67,19 +67,27 @@ class FaultDetector:
         logger.info("FaultDetector stopped")
 
     async def _listen(self):
-        pubsub = self.redis.pubsub()
-        await pubsub.subscribe("pole_state_changes")
-        try:
-            async for message in pubsub.listen():
-                if message["type"] == "message":
-                    try:
-                        data = json.loads(message["data"])
-                        await self._on_pole_state_change(data)
-                    except Exception as e:
-                        logger.error(f"Error processing pole state change: {e}", exc_info=True)
-        except asyncio.CancelledError:
-            await pubsub.unsubscribe("pole_state_changes")
-            await pubsub.close()
+        while True:
+            try:
+                pubsub = self.redis.pubsub()
+                await pubsub.subscribe("pole_state_changes")
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        try:
+                            data = json.loads(message["data"])
+                            await self._on_pole_state_change(data)
+                        except Exception as e:
+                            logger.error(f"Error processing pole state change: {e}", exc_info=True)
+            except asyncio.CancelledError:
+                try:
+                    await pubsub.unsubscribe("pole_state_changes")
+                    await pubsub.close()
+                except Exception:
+                    pass
+                break
+            except Exception as e:
+                logger.error(f"Redis pubsub connection dropped: {e}. Reconnecting in 5s...")
+                await asyncio.sleep(5)
 
     async def _on_pole_state_change(self, message: dict):
         """Called for each pole state change. Starts/extends debounce window."""
