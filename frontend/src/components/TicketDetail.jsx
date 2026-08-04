@@ -95,7 +95,7 @@ export function TicketDetail({ ticketId, onClose, onActionComplete }) {
           {/* Location */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <h3 style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Location</h3>
-            <p style={{ fontSize: '14px', lineHeight: '1.5' }}>{ticket.location_description}</p>
+            <p style={{ fontSize: '14px', lineHeight: '1.5' }}>{ticket.fault_location_description}</p>
             
             <div style={{ display: 'flex', gap: '16px', marginTop: '4px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)' }}>

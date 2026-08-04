@@ -68,13 +68,13 @@ export function IncidentList({ selectedTicketId, onSelectTicket }) {
         )}
 
         {sortedTickets.map(ticket => {
-          const isSelected = ticket.ticket_id === selectedTicketId;
+          const isSelected = ticket.id === selectedTicketId;
           const isNew = pulse && ticket.status === 'detected';
           
           return (
             <div 
-              key={ticket.ticket_id}
-              onClick={() => onSelectTicket(ticket.ticket_id)}
+              key={ticket.id}
+              onClick={() => onSelectTicket(ticket.id)}
               className={isNew ? 'pulse-border-red' : ''}
               style={{
                 backgroundColor: isSelected ? 'var(--bg-card-hover)' : 'var(--bg-card)',
@@ -107,9 +107,9 @@ export function IncidentList({ selectedTicketId, onSelectTicket }) {
               </div>
               
               <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: '1.4' }}>
-                {ticket.location_description.length > 60 
-                  ? ticket.location_description.substring(0, 60) + '...' 
-                  : ticket.location_description}
+                {(ticket.fault_location_description || '').length > 60 
+                  ? (ticket.fault_location_description || '').substring(0, 60) + '...' 
+                  : ticket.fault_location_description}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

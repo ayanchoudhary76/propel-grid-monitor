@@ -72,7 +72,7 @@ export function Map({ selectedTicketId, onSelectTicket }) {
   // When a ticket is selected, select its DT and pan to the fault location
   useEffect(() => {
     if (selectedTicketId && activeTickets) {
-      const ticket = activeTickets.find(t => t.ticket_id === selectedTicketId);
+      const ticket = activeTickets.find(t => t.id === selectedTicketId);
       if (ticket) {
         setMapCenter([ticket.lat, ticket.lon]);
         setMapZoom(16);
@@ -196,11 +196,11 @@ export function Map({ selectedTicketId, onSelectTicket }) {
         {/* Fault Markers (from active tickets) */}
         {activeTickets?.map(ticket => (
           <Marker 
-            key={`fault-${ticket.ticket_id}`} 
+            key={`fault-${ticket.id}`} 
             position={[ticket.lat, ticket.lon]} 
             icon={faultIcon}
             eventHandlers={{
-              click: () => onSelectTicket(ticket.ticket_id)
+              click: () => onSelectTicket(ticket.id)
             }}
           />
         ))}
