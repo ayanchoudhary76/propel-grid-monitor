@@ -121,6 +121,28 @@ class FaultSimulator:
                     ))
                     sent += 1
 
+        # Force at least one message to be sent for faults to avoid demo hanging
+        # when all affected poles randomly suppress their packets.
+        if not is_restoration and sent == 0 and affected_poles:
+            # Find the first pole with a device
+            first_valid = next((p for p in affected_poles if p.device_id), None)
+            if first_valid:
+                fw = self._get_fw(first_valid.device_id)
+                skew = timedelta(seconds=self.rng.randint(-10, 10))
+                payloads.append(TelemetryPayload(
+                    device_id=first_valid.device_id,
+                    pole_id=first_valid.pole_id,
+                    event=EventType.power_lost,
+                    energized=False,
+                    ts=now + skew,
+                    seq=self._next_seq(first_valid.device_id),
+                    battery_mv=self.rng.randint(3500, 4200),
+                    rssi=self.rng.randint(-90, -50),
+                    fw=fw
+                ))
+                sent += 1
+                suppressed = max(0, suppressed - 1)
+
         await self._send_batch(payloads)
         return sent, suppressed
 
