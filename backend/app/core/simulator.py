@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -37,7 +38,13 @@ class FaultSimulator:
         self.rng = random.Random(42)  # For reproducible jitter/skew
 
     def _next_seq(self, device_id: str) -> int:
-        self._seq_counters[device_id] = self._seq_counters.get(device_id, 1000) + 1
+        # The DB deduplicates on (device_id, seq), so restarting from a fixed
+        # counter would silently discard every new simulator message after a
+        # restart or reset.  A microsecond epoch remains monotonic per device
+        # and safely advances beyond persisted simulator telemetry.
+        next_counter = self._seq_counters.get(device_id, 0) + 1
+        current_epoch = time.time_ns() // 1_000
+        self._seq_counters[device_id] = max(next_counter, current_epoch)
         return self._seq_counters[device_id]
 
     def _get_fw(self, device_id: str) -> str:
@@ -146,9 +153,28 @@ class FaultSimulator:
         await self._send_batch(payloads)
         return sent, suppressed
 
+    @staticmethod
+    def _require_observable_target(affected_poles: List[PoleNode], target: str) -> None:
+        """Ensure a fault target has a reporting device to observe its outage.
+
+        A simulated fault only reaches the fault detector through a state-change
+        event emitted by an affected pole.  Without at least one device, the
+        simulator previously kept the fault in ``active_faults`` forever while
+        sending zero telemetry, which made an incident impossible to create.
+        """
+        if not any(pole.device_id for pole in affected_poles):
+            raise ValueError(
+                f"Cannot simulate {target}: no monitored poles are affected. "
+                "Choose a target with at least one downstream device."
+            )
+
     async def inject_span_fault(self, pole_id_upstream: str, pole_id_downstream: str) -> SimulatedFault:
         affected_pole_ids = [pole_id_downstream] + self.topology.get_downstream_poles(pole_id_downstream)
         affected_poles = [self.topology.poles[pid] for pid in affected_pole_ids if pid in self.topology.poles]
+        self._require_observable_target(
+            affected_poles,
+            f"span between {pole_id_upstream} and {pole_id_downstream}",
+        )
         
         sent, suppressed = await self._generate_telemetry(affected_poles, is_restoration=False)
         
@@ -168,6 +194,7 @@ class FaultSimulator:
     async def inject_dt_fault(self, dt_id: str) -> SimulatedFault:
         affected_poles = self.topology.get_poles_for_dt(dt_id)
         affected_pole_ids = [p.pole_id for p in affected_poles]
+        self._require_observable_target(affected_poles, f"DT {dt_id}")
 
         sent, suppressed = await self._generate_telemetry(affected_poles, is_restoration=False)
 
@@ -187,6 +214,7 @@ class FaultSimulator:
     async def inject_feeder_fault(self, feeder_id: str) -> SimulatedFault:
         affected_poles = self.topology.get_poles_for_feeder(feeder_id)
         affected_pole_ids = [p.pole_id for p in affected_poles]
+        self._require_observable_target(affected_poles, f"feeder {feeder_id}")
 
         sent, suppressed = await self._generate_telemetry(affected_poles, is_restoration=False)
 
@@ -413,8 +441,8 @@ class FaultSimulator:
                 for i in range(0, len(keys_to_del), chunk_size):
                     await self.redis.delete(*keys_to_del[i:i+chunk_size])
                 
-            # Clear outage manager
-            self.outage_manager.active_outages.clear()
+            # Clear simulator-created scheduled outages.
+            self.outage_manager.clear()
             
             # Reset counters
             self._seq_counters.clear()

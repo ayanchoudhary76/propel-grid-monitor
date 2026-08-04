@@ -26,6 +26,10 @@ class ScheduledOutageManager:
         """Remove/cancel a scheduled outage."""
         self._outages = [o for o in self._outages if o.id != outage_id]
 
+    def clear(self):
+        """Remove all scheduled outages (used when the simulator is reset)."""
+        self._outages.clear()
+
     def get_active_outages(self, at_time: Optional[datetime] = None) -> List[ScheduledOutage]:
         """Return outages active at the given time (default: now) including buffer."""
         if at_time is None:
