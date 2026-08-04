@@ -138,7 +138,7 @@ def get_topology(request: Request) -> NetworkTopology:
     return request.app.state.topology
 
 
-@app.get("/", tags=["root"])
+@app.get("/api", tags=["root"])
 async def root():
     """API root — links to key endpoints."""
     return {
@@ -152,3 +152,12 @@ async def root():
         "tickets": "/api/tickets",
         "scheduled_outages": "/api/scheduled-outages"
     }
+
+import os
+from pathlib import Path
+
+# At the END of main.py, after all router includes:
+static_dir = Path("static")
+if static_dir.is_dir():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory="static", html=True), name="static")

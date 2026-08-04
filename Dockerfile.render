@@ -1,0 +1,42 @@
+# ============================================================
+# Combined Dockerfile for Render deployment
+# Builds frontend + backend into a single image.
+# FastAPI serves React build as static files at "/"
+# and API at "/api/*" — no nginx needed.
+# ============================================================
+
+# Stage 1: Build React frontend
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app
+COPY frontend/package*.json ./
+RUN npm install --prefer-offline --silent
+COPY frontend/ .
+RUN npm run build
+
+# Stage 2: Python backend + frontend static files
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system deps for asyncpg
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python deps
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend/app/ ./app/
+
+# Copy frontend build into static/ directory
+COPY --from=frontend-builder /app/dist ./static/
+
+# Render sets PORT env var (usually 10000)
+ENV PORT=8000
+
+EXPOSE ${PORT}
+
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT}

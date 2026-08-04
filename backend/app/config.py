@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 
 
 class Settings(BaseSettings):
@@ -11,5 +12,18 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "propel123"
     POSTGRES_DB: str = "propel_grid"
 
+    @model_validator(mode="after")
+    def _fix_database_url(self):
+        """Render provides ``postgresql://`` but asyncpg needs
+        ``postgresql+asyncpg://``.  Auto-convert so deployment
+        works without manual env-var editing."""
+        url = self.DATABASE_URL
+        if url.startswith("postgresql://"):
+            self.DATABASE_URL = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgres://"):
+            self.DATABASE_URL = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        return self
+
 
 settings = Settings()
+
