@@ -27,6 +27,9 @@ export function TicketDetail({ ticketId, onClose, onActionComplete }) {
     if (ticketId) {
       setLoading(true);
       fetchTicket();
+      // Poll every 5s to stay in sync with left panel
+      const interval = setInterval(fetchTicket, 5000);
+      return () => clearInterval(interval);
     }
   }, [ticketId]);
 
@@ -154,10 +157,10 @@ export function TicketDetail({ ticketId, onClose, onActionComplete }) {
               />
               <TimelineItem 
                 icon={<User size={12} color="#fff" />} 
-                bg={ticket.crew_assigned_at ? "var(--accent-blue)" : "var(--border-color)"}
+                bg={['crew_assigned','resolved','verified','closed'].includes(ticket.status) ? "var(--accent-blue)" : "var(--border-color)"}
                 title="Crew Assigned" 
-                time={ticket.crew_assigned_at} 
-                active={!!ticket.crew_assigned_at}
+                time={['crew_assigned','resolved','verified','closed'].includes(ticket.status) ? (ticket.acknowledged_at || ticket.detected_at) : null} 
+                active={['crew_assigned','resolved','verified','closed'].includes(ticket.status)}
               />
               <TimelineItem 
                 icon={<Wrench size={12} color="#fff" />} 
