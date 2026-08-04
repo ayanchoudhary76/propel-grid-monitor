@@ -123,11 +123,11 @@ export function TicketDetail({ ticketId, onClose, onActionComplete }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div style={{ backgroundColor: 'var(--bg-card)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Affected Poles</div>
-                <div style={{ fontSize: '18px', fontWeight: '600', color: 'var(--accent-red)', marginTop: '4px' }}>{ticket.affected_poles_count}</div>
+                <div style={{ fontSize: '18px', fontWeight: '600', color: 'var(--accent-red)', marginTop: '4px' }}>{ticket.affected_downstream_count || (ticket.affected_pole_ids ? ticket.affected_pole_ids.split(' ').filter(Boolean).length : 0)}</div>
               </div>
               <div style={{ backgroundColor: 'var(--bg-card)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Estimated Households</div>
-                <div style={{ fontSize: '18px', fontWeight: '600', marginTop: '4px' }}>{ticket.est_households_affected || '?'}</div>
+                <div style={{ fontSize: '18px', fontWeight: '600', marginTop: '4px' }}>~{((ticket.affected_downstream_count || (ticket.affected_pole_ids ? ticket.affected_pole_ids.split(' ').filter(Boolean).length : 0)) * 4)}</div>
               </div>
             </div>
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>

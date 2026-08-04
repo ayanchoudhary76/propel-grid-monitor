@@ -113,9 +113,9 @@ export function IncidentList({ selectedTicketId, onSelectTicket }) {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  {ticket.affected_poles_count} poles affected
-                </span>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  {ticket.affected_downstream_count || (ticket.affected_pole_ids ? ticket.affected_pole_ids.split(' ').filter(Boolean).length : 0)} poles affected
+                </div>
                 <ConfidenceBadge source={ticket.topology_source} />
               </div>
             </div>
