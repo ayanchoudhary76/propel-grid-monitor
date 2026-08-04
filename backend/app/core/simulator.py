@@ -374,25 +374,32 @@ class FaultSimulator:
 
     async def reset(self) -> dict:
         """Repair all faults, clear tickets, reset redis."""
-        for fault_id in list(self.active_faults.keys()):
-            await self.repair_fault(fault_id)
+        try:
+            for fault_id in list(self.active_faults.keys()):
+                await self.repair_fault(fault_id)
+                
+            async with AsyncSessionLocal() as session:
+                from app.models.ticket import Ticket
+                from sqlalchemy import delete
+                await session.execute(delete(Ticket))
+                await session.commit()
+                
+            # Redis flush in chunks to avoid max-arguments error
+            keys_to_del = await self.redis.keys("pole:*") + await self.redis.keys("poles:*")
+            if keys_to_del:
+                chunk_size = 500
+                for i in range(0, len(keys_to_del), chunk_size):
+                    await self.redis.delete(*keys_to_del[i:i+chunk_size])
+                
+            # Clear outage manager
+            self.outage_manager.active_outages.clear()
             
-        async with AsyncSessionLocal() as session:
-            from app.models.ticket import Ticket
-            from sqlalchemy import delete
-            await session.execute(delete(Ticket))
-            await session.commit()
+            # Reset counters
+            self._seq_counters.clear()
             
-        # Redis flush
-        from app.api.ingest import POLE_HASH_KEY, POLES_LIVE_KEY, POLES_DARK_KEY
-        keys_to_del = await self.redis.keys("pole:*") + await self.redis.keys("poles:*")
-        if keys_to_del:
-            await self.redis.delete(*keys_to_del)
-            
-        # Clear outage manager
-        self.outage_manager.active_outages.clear()
-        
-        # Reset counters
-        self._seq_counters.clear()
-        
-        return {"status": "reset complete"}
+            return {"status": "reset complete"}
+        except Exception as e:
+            import traceback
+            logger.error(f"Error in reset: {e}")
+            logger.error(traceback.format_exc())
+            return {"status": "error", "error": str(e)}
